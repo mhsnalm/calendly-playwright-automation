@@ -1,0 +1,132 @@
+name: Playwright Automation
+
+on:
+  workflow_dispatch:  
+    inputs:
+      transactionurl:
+        description: 'Transaction URL'
+        required: true
+        type: string
+      date:
+        description: 'Date'
+        required: true
+        type: string
+      time:
+        description: 'Time'
+        required: true
+        type: string
+      name:
+        description: 'Name'
+        required: true
+        type: string
+      email:
+        description: 'Email'
+        required: true
+        type: string
+      comments:
+        description: 'Comments'
+        required: false
+        type: string
+      fileid:
+        description: 'File ID'
+        required: true
+        type: string
+      success_url:
+        description: 'Test Success URL'
+        required: false
+        type: string
+      failure_url:
+        description: 'Test failure URL'
+        required: false
+        type: string
+
+jobs:
+  test:
+    timeout-minutes: 60
+    runs-on: self-hosted
+
+    steps:
+    - name: Set up Git
+      run: |
+        git config --global http.sslVerify false
+      shell: powershell
+
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      env:
+        GIT_SSL_NO_VERIFY: true  # Disable SSL verification for Git
+
+    - uses: actions/setup-node@v4
+      with:
+        node-version: lts/*
+
+    - name: Install dependencies
+      run: npm ci
+      shell: powershell
+
+    - name: Install Playwright Browsers
+      run: npx playwright install --with-deps
+      shell: powershell
+
+    - name: Run Playwright Automation
+      run: |
+        $env:TRANSACTION_URL = "${{ github.event.inputs.transactionurl }}"
+        $env:DATE = "${{ github.event.inputs.date }}"
+        $env:TIME = "${{ github.event.inputs.time }}"
+        $env:NAME = "${{ github.event.inputs.name }}"
+        $env:EMAIL = "${{ github.event.inputs.email }}"
+        $env:COMMENTS = "${{ github.event.inputs.comments }}"
+        $env:FILE_ID = "${{ github.event.inputs.fileid }}"
+        npx playwright test calendly.spec.js --headed
+      shell: powershell
+
+    - uses: actions/upload-artifact@v4
+      if: ${{ !cancelled() }}
+      with:
+        name: playwright-report
+        path: playwright-report/
+        retention-days: 30
+
+    - name: Get Artifact URL
+      if: always()
+      id: get-artifact-url
+      run: echo "artifact_url=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts" >> $GITHUB_ENV
+      shell: powershell
+
+    - name: Call Success URL
+      if: success() && github.event.inputs.success_url != ''
+      run: |
+        $Body = @{
+          transactionurl = "${{ github.event.inputs.transactionurl }}"
+          Status = "Success"
+          date = "${{ github.event.inputs.date }}"
+          time = "${{ github.event.inputs.time }}"
+          name = "${{ github.event.inputs.name }}"
+          email = "${{ github.event.inputs.email }}"
+          comments = "${{ github.event.inputs.comments }}"
+          fileid = "${{ github.event.inputs.fileid }}"
+          report_url = "${{ env.artifact_url }}"
+          playwright_output = "${{ env.playwright_output }}"
+        } | ConvertTo-Json -Depth 10
+        Invoke-RestMethod -Uri "${{ github.event.inputs.success_url }}" -Method POST -ContentType "application/json" -Body $Body
+      shell: powershell
+    
+
+    - name: Call Failure URL
+      if: failure() && github.event.inputs.failure_url != ''
+      run: |
+        $Body = @{
+          Status = "Failure"
+          transactionurl = "${{ github.event.inputs.transactionurl }}"
+          date = "${{ github.event.inputs.date }}"
+          time = "${{ github.event.inputs.time }}"
+          name = "${{ github.event.inputs.name }}"
+          email = "${{ github.event.inputs.email }}"
+          comments = "${{ github.event.inputs.comments }}"
+          fileid = "${{ github.event.inputs.fileid }}"
+          report_url = "${{ env.artifact_url }}"
+          playwright_output = "${{ env.playwright_output }}"
+        } | ConvertTo-Json -Depth 10
+        Invoke-RestMethod -Uri "${{ github.event.inputs.failure_url }}" -Method POST -ContentType "application/json" -Body $Body
+      shell: powershell
+    
